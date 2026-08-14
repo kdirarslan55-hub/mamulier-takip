@@ -1,42 +1,54 @@
 const express = require('express');
-const Database = require('better-sqlite3');
+const fs = require('fs');
+const path = require('path');
 
 const app = express();
-const db = new Database('votes.db');
+const DATA_FILE = path.join(__dirname, 'votes.json');
 
-db.exec(`CREATE TABLE IF NOT EXISTS votes (
-  urun_idx INTEGER,
-  kisi TEXT,
-  oy TEXT,
-  PRIMARY KEY (urun_idx, kisi)
-)`);
+function readVotes() {
+  try {
+    return JSON.parse(fs.readFileSync(DATA_FILE, 'utf8'));
+  } catch (e) {
+    return {};
+  }
+}
+
+function writeVotes(v) {
+  try {
+    fs.writeFileSync(DATA_FILE, JSON.stringify(v));
+  } catch (e) {
+    console.error('Kaydetme hatasi:', e.message);
+  }
+}
 
 app.use(express.json());
 app.use(express.static('public', { etag: false, maxAge: 0 }));
 
 app.get('/api/votes', (req, res) => {
-  const rows = db.prepare('SELECT * FROM votes').all();
-  const result = {};
-  rows.forEach(r => {
-    if (!result[r.urun_idx]) result[r.urun_idx] = {};
-    result[r.urun_idx][r.kisi] = r.oy;
-  });
-  res.json(result);
+  res.json(readVotes());
 });
 
 app.post('/api/vote', (req, res) => {
   const { urun_idx, kisi, oy } = req.body;
-  if (!['Şura','Ebru','Sema','Öznur'].includes(kisi)) return res.status(400).json({error:'Geçersiz kişi'});
-  if (!['iste','iade','pas'].includes(oy)) return res.status(400).json({error:'Geçersiz oy'});
-  db.prepare('INSERT OR REPLACE INTO votes (urun_idx, kisi, oy) VALUES (?,?,?)').run(urun_idx, kisi, oy);
+  if (!['Şura','Ebru','Sema','Öznur'].includes(kisi)) return res.status(400).json({error:'Gecersiz kisi'});
+  if (!['iste','iade','pas'].includes(oy)) return res.status(400).json({error:'Gecersiz oy'});
+  const votes = readVotes();
+  if (!votes[urun_idx]) votes[urun_idx] = {};
+  votes[urun_idx][kisi] = oy;
+  writeVotes(votes);
   res.json({ok:true});
 });
 
 app.delete('/api/vote', (req, res) => {
   const { urun_idx, kisi } = req.body;
-  db.prepare('DELETE FROM votes WHERE urun_idx=? AND kisi=?').run(urun_idx, kisi);
+  const votes = readVotes();
+  if (votes[urun_idx]) {
+    delete votes[urun_idx][kisi];
+    if (Object.keys(votes[urun_idx]).length === 0) delete votes[urun_idx];
+  }
+  writeVotes(votes);
   res.json({ok:true});
 });
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`Sunucu calisiyor: ${PORT}`));
+app.listen(PORT, () => console.log('Sunucu calisiyor: ' + PORT));
